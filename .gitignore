@@ -1,0 +1,59 @@
+# Environment Variables (NEVER commit these!)
+.env
+.env.local
+.env.*.local
+Backend/.env
+Backend/.env.local
+
+# BUT allow .env.example template files
+!.env.example
+!Backend/.env.example
+
+# Dependencies
+node_modules/
+Backend/node_modules/
+
+# Build outputs
+dist/
+build/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# Swift Package Manager
+.swiftpm/
+Packages/
+
+# Xcode
+*.xcworkspace
+!*.xcworkspace/contents.xcworkspacedata
+*.xcuserstate
+*.xcuserdatad
+
+# macOS
+.DS_Store
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+Backend/*.db
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+
+# Plaid access tokens (if stored locally)
+plaid_tokens/
+access_tokens/
