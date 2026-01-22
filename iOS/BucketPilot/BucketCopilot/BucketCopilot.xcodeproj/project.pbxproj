@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CB430BE72F21A90D000FEFC0 /* LinkKit in Frameworks */ = {isa = PBXBuildFile; productRef = CB430BE62F21A90D000FEFC0 /* LinkKit */; };
+		CBCC06B62F21FD7A0045701D /* LinkKit in Frameworks */ = {isa = PBXBuildFile; productRef = CBCC06B52F21FD7A0045701D /* LinkKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,7 +117,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CB430BE72F21A90D000FEFC0 /* LinkKit in Frameworks */,
+				CBCC06B62F21FD7A0045701D /* LinkKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -144,6 +144,7 @@
 				CB430B5B2F214EE6000FEFC0 /* BucketPilot */,
 				CB430B3D2F214934000FEFC0 /* BucketCopilotTests */,
 				CB430B472F214934000FEFC0 /* BucketCopilotUITests */,
+				CBCC06B42F21FD7A0045701D /* Frameworks */,
 				CB430B2E2F214931000FEFC0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -156,6 +157,13 @@
 				CB430B442F214934000FEFC0 /* BucketCopilotUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		CBCC06B42F21FD7A0045701D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -175,7 +183,7 @@
 			);
 			name = BucketCopilot;
 			packageProductDependencies = (
-				CB430BE62F21A90D000FEFC0 /* LinkKit */,
+				CBCC06B52F21FD7A0045701D /* LinkKit */,
 			);
 			productName = BucketCopilot;
 			productReference = CB430B2D2F214931000FEFC0 /* BucketCopilot.app */;
@@ -262,7 +270,7 @@
 			mainGroup = CB430B242F214931000FEFC0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				CB430BE52F21A90D000FEFC0 /* XCRemoteSwiftPackageReference "plaid-link-ios" */,
+				CB430BE92F21F5DD000FEFC0 /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CB430B2E2F214931000FEFC0 /* Products */;
@@ -652,20 +660,20 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		CB430BE52F21A90D000FEFC0 /* XCRemoteSwiftPackageReference "plaid-link-ios" */ = {
+		CB430BE92F21F5DD000FEFC0 /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/plaid/plaid-link-ios";
+			repositoryURL = "https://github.com/plaid/plaid-link-ios-spm";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 6.4.3;
+				minimumVersion = 6.0.4;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		CB430BE62F21A90D000FEFC0 /* LinkKit */ = {
+		CBCC06B52F21FD7A0045701D /* LinkKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CB430BE52F21A90D000FEFC0 /* XCRemoteSwiftPackageReference "plaid-link-ios" */;
+			package = CB430BE92F21F5DD000FEFC0 /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */;
 			productName = LinkKit;
 		};
 /* End XCSwiftPackageProductDependency section */

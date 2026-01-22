@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "2620"
-   version = "1.7">
+   version = "2.2">
    <BuildAction
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
@@ -20,6 +20,15 @@
                BlueprintName = "BucketCopilot"
                ReferencedContainer = "container:BucketCopilot.xcodeproj">
             </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <AutocreatedTestPlanReference>
+            </AutocreatedTestPlanReference>
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
@@ -77,7 +86,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "BACKEND_URL"
-            value = "http://localhost:3000"
+            value = "http://127.0.0.1:3000"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

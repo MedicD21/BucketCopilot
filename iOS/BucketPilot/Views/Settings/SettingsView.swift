@@ -229,6 +229,7 @@ struct PlaidLinkView: View {
     @State private var linkToken: String?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var showingLink = false
     private let plaidService = PlaidService()
     
     var body: some View {
@@ -246,10 +247,33 @@ struct PlaidLinkView: View {
                 
                 #if canImport(LinkKit)
                 if let linkToken = linkToken {
-                    PlaidLinkPresenter(
-                        linkToken: linkToken,
-                        onSuccess: handleSuccess,
-                        onExit: handleExit
+                    VStack(spacing: 12) {
+                        ProgressView("Opening Plaid...")
+                        Button("Open Plaid Link") {
+                            showingLink = true
+                        }
+                    }
+                    .plaidLink(
+                        isPresented: $showingLink,
+                        token: linkToken,
+                        onSuccess: { success in
+                            handleSuccess(publicToken: success.publicToken)
+                        },
+                        onExit: { exit in
+                            handleExit(message: exit.error?.localizedDescription)
+                        },
+                        onEvent: { _ in },
+                        onLoad: { },
+                        errorView: AnyView(
+                            VStack(spacing: 12) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                Text("Link failed to load")
+                                Button("Dismiss") {
+                                    showingLink = false
+                                }
+                            }
+                            .padding()
+                        )
                     )
                 }
                 #else
@@ -279,6 +303,7 @@ struct PlaidLinkView: View {
         errorMessage = nil
         do {
             linkToken = try await plaidService.createLinkToken()
+            showingLink = true
         } catch {
             errorMessage = "Failed to create link token: \(error.localizedDescription)"
         }
@@ -291,6 +316,7 @@ struct PlaidLinkView: View {
                 try await plaidService.exchangePublicToken(publicToken)
                 await MainActor.run {
                     isConnected = true
+                    linkHandler = nil
                     dismiss()
                 }
             } catch {
@@ -307,50 +333,6 @@ struct PlaidLinkView: View {
         } else {
             dismiss()
         }
+        showingLink = false
     }
 }
-
-#if canImport(LinkKit)
-private struct PlaidLinkPresenter: UIViewControllerRepresentable {
-    let linkToken: String
-    let onSuccess: (String) -> Void
-    let onExit: (String?) -> Void
-    
-    func makeUIViewController(context: Context) -> UIViewController {
-        let controller = PlaidLinkHostingController()
-        controller.presentLink = { presentingController in
-            var configuration = LinkTokenConfiguration(token: linkToken) { success in
-                onSuccess(success.publicToken)
-            }
-            configuration.onExit = { exit in
-                onExit(exit.error?.localizedDescription)
-            }
-            
-            let result = Plaid.create(configuration)
-            switch result {
-            case .success(let handler):
-                handler.open(presentUsing: .viewController(presentingController))
-            case .failure(let error):
-                onExit(error.localizedDescription)
-            }
-        }
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
-}
-
-private final class PlaidLinkHostingController: UIViewController {
-    var presentLink: ((UIViewController) -> Void)?
-    private var didPresent = false
-    
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        guard !didPresent else {
-            return
-        }
-        didPresent = true
-        presentLink?(self)
-    }
-}
-#endif
