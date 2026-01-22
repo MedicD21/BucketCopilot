@@ -1,11 +1,15 @@
 import SwiftUI
 import SwiftData
+#if canImport(LinkKit)
+import LinkKit
+#endif
 
 struct SettingsView: View {
-    @Environment(\.modelContext) private var modelContext
+    @SwiftUI.Environment(\.modelContext) private var modelContext
     @Query private var syncState: [SyncState]
+    @Query private var buckets: [Bucket]
     @State private var showingPlaidLink = false
-    @State private var bankConnected = false
+    @AppStorage("bankConnected") private var bankConnected = false
     @State private var syncStatusMessage: String?
     @State private var isSyncing = false
     
@@ -67,6 +71,14 @@ struct SettingsView: View {
                         Button("Configure Sync") {
                             // TODO: Show sync config sheet
                         }
+                        #if DEBUG
+                        Button("Create Test Allocation") {
+                            createTestAllocation()
+                        }
+                        Button("Reset Local Data") {
+                            resetLocalData()
+                        }
+                        #endif
                     }
                 }
                 
@@ -100,7 +112,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showingPlaidLink) {
-                PlaidLinkView()
+                PlaidLinkView(isConnected: $bankConnected)
             }
         }
     }
@@ -155,6 +167,55 @@ struct SettingsView: View {
         // TODO: Implement data export
         print("Exporting data as \(format)")
     }
+
+    private func createTestAllocation() {
+        let bucket: Bucket
+        if let existing = buckets.first {
+            bucket = existing
+        } else {
+            let newBucket = Bucket(name: "Test Bucket")
+            modelContext.insert(newBucket)
+            bucket = newBucket
+        }
+        
+        let event = AllocationEvent(
+            bucket: bucket,
+            amount: 10,
+            sourceType: .manual,
+            sourceId: "debug",
+            timestamp: Date(),
+            sequence: 0,
+            synced: false
+        )
+        
+        modelContext.insert(event)
+        try? modelContext.save()
+        syncStatusMessage = "Created test allocation event"
+    }
+
+    private func resetLocalData() {
+        do {
+            try deleteAll(Bucket.self)
+            try deleteAll(Transaction.self)
+            try deleteAll(TransactionSplit.self)
+            try deleteAll(AllocationEvent.self)
+            try deleteAll(FundingRule.self)
+            try deleteAll(MerchantMappingRule.self)
+            try deleteAll(SyncState.self)
+            try modelContext.save()
+            syncStatusMessage = "Local data cleared"
+        } catch {
+            syncStatusMessage = "Reset failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteAll<T: PersistentModel>(_ type: T.Type) throws {
+        let descriptor = FetchDescriptor<T>()
+        let items = try modelContext.fetch(descriptor)
+        for item in items {
+            modelContext.delete(item)
+        }
+    }
 }
 
 enum ExportFormat {
@@ -163,13 +224,40 @@ enum ExportFormat {
 }
 
 struct PlaidLinkView: View {
-    @Environment(\.dismiss) private var dismiss
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+    @Binding var isConnected: Bool
+    @State private var linkToken: String?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    private let plaidService = PlaidService()
     
     var body: some View {
         NavigationView {
             VStack {
-                Text("Plaid Link Integration - Coming soon")
+                if let errorMessage = errorMessage {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                } else if isLoading {
+                    ProgressView("Preparing Plaid Link...")
+                        .padding()
+                }
+                
+                #if canImport(LinkKit)
+                if let linkToken = linkToken {
+                    PlaidLinkPresenter(
+                        linkToken: linkToken,
+                        onSuccess: handleSuccess,
+                        onExit: handleExit
+                    )
+                }
+                #else
+                Text("LinkKit not installed. Add Plaid's LinkKit via Swift Package Manager.")
                     .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding()
+                #endif
             }
             .navigationTitle("Connect Bank")
             .navigationBarTitleDisplayMode(.inline)
@@ -181,5 +269,88 @@ struct PlaidLinkView: View {
                 }
             }
         }
+        .task {
+            await loadLinkToken()
+        }
+    }
+    
+    private func loadLinkToken() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            linkToken = try await plaidService.createLinkToken()
+        } catch {
+            errorMessage = "Failed to create link token: \(error.localizedDescription)"
+        }
+        isLoading = false
+    }
+    
+    private func handleSuccess(publicToken: String) {
+        Task {
+            do {
+                try await plaidService.exchangePublicToken(publicToken)
+                await MainActor.run {
+                    isConnected = true
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to exchange token: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    private func handleExit(message: String?) {
+        if let message = message, !message.isEmpty {
+            errorMessage = message
+        } else {
+            dismiss()
+        }
     }
 }
+
+#if canImport(LinkKit)
+private struct PlaidLinkPresenter: UIViewControllerRepresentable {
+    let linkToken: String
+    let onSuccess: (String) -> Void
+    let onExit: (String?) -> Void
+    
+    func makeUIViewController(context: Context) -> UIViewController {
+        let controller = PlaidLinkHostingController()
+        controller.presentLink = { presentingController in
+            var configuration = LinkTokenConfiguration(token: linkToken) { success in
+                onSuccess(success.publicToken)
+            }
+            configuration.onExit = { exit in
+                onExit(exit.error?.localizedDescription)
+            }
+            
+            let result = Plaid.create(configuration)
+            switch result {
+            case .success(let handler):
+                handler.open(presentUsing: .viewController(presentingController))
+            case .failure(let error):
+                onExit(error.localizedDescription)
+            }
+        }
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+
+private final class PlaidLinkHostingController: UIViewController {
+    var presentLink: ((UIViewController) -> Void)?
+    private var didPresent = false
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !didPresent else {
+            return
+        }
+        didPresent = true
+        presentLink?(self)
+    }
+}
+#endif

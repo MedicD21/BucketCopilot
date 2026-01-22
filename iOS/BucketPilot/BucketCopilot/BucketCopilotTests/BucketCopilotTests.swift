@@ -5,13 +5,11 @@
 //  Created by Dustin Schaaf on 1/21/26.
 //
 
-import Testing
+import XCTest
 @testable import BucketCopilot
 
-struct BucketCopilotTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+final class BucketCopilotTests: XCTestCase {
+    func testExample() throws {
+        XCTAssertTrue(true)
     }
-
 }

@@ -5,6 +5,7 @@
 
 import express from 'express';
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid';
+import { supabase, Tables } from '../db/supabase';
 
 const router = express.Router();
 
@@ -21,6 +22,23 @@ const configuration = new Configuration({
 
 const plaidClient = new PlaidApi(configuration);
 
+async function getStoredAccessToken(userId: string): Promise<string | null> {
+    const { data, error } = await supabase
+        .from(Tables.PLAID_ITEMS)
+        .select('access_token_encrypted')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    
+    if (error) {
+        console.error('Error fetching Plaid access token:', error.message);
+        return null;
+    }
+    
+    return data?.access_token_encrypted ?? null;
+}
+
 /**
  * POST /plaid/create_link_token
  * Creates a Link token for Plaid Link flow
@@ -28,7 +46,10 @@ const plaidClient = new PlaidApi(configuration);
 router.post('/create_link_token', async (req, res) => {
     try {
         // TODO: Extract userId from auth middleware
-        const userId = 'user-123'; // Placeholder
+        const userId = process.env.DEV_USER_ID;
+        if (!userId) {
+            return res.status(500).json({ error: 'DEV_USER_ID is not set' });
+        }
         
         const request = {
             user: {
@@ -61,7 +82,10 @@ router.post('/create_link_token', async (req, res) => {
 router.post('/exchange_public_token', async (req, res) => {
     try {
         const { public_token } = req.body;
-        const userId = 'user-123'; // TODO: From auth
+        const userId = process.env.DEV_USER_ID; // TODO: From auth
+        if (!userId) {
+            return res.status(500).json({ error: 'DEV_USER_ID is not set' });
+        }
         
         if (!public_token) {
             return res.status(400).json({ error: 'public_token is required' });
@@ -73,9 +97,20 @@ router.post('/exchange_public_token', async (req, res) => {
         
         const { access_token, item_id } = response.data;
         
-        // TODO: Encrypt and store access_token in database
-        // const encryptedToken = encrypt(access_token);
-        // await db.plaidItems.upsert({ ... });
+        const { error: upsertError } = await supabase
+            .from(Tables.PLAID_ITEMS)
+            .upsert(
+                {
+                    user_id: userId,
+                    item_id,
+                    access_token_encrypted: access_token,
+                },
+                { onConflict: 'item_id' }
+            );
+        
+        if (upsertError) {
+            throw upsertError;
+        }
         
         res.json({
             success: true,
@@ -97,14 +132,13 @@ router.post('/exchange_public_token', async (req, res) => {
  */
 router.get('/accounts', async (req, res) => {
     try {
-        const userId = 'user-123'; // TODO: From auth
+        const userId = process.env.DEV_USER_ID; // TODO: From auth
+        if (!userId) {
+            return res.status(500).json({ error: 'DEV_USER_ID is not set' });
+        }
         
-        // TODO: Fetch encrypted access_token from database
-        // const item = await db.plaidItems.findUnique({ where: { userId } });
-        // const access_token = decrypt(item.accessTokenEncrypted);
-        
-        // Placeholder access_token for development
-        const access_token = process.env.PLAID_ACCESS_TOKEN || '';
+        const storedToken = await getStoredAccessToken(userId);
+        const access_token = storedToken || process.env.PLAID_ACCESS_TOKEN || '';
         
         if (!access_token) {
             return res.status(404).json({ error: 'No connected account' });
@@ -133,10 +167,13 @@ router.get('/accounts', async (req, res) => {
 router.get('/transactions', async (req, res) => {
     try {
         const { cursor, start_date, end_date } = req.query;
-        const userId = 'user-123'; // TODO: From auth
+        const userId = process.env.DEV_USER_ID; // TODO: From auth
+        if (!userId) {
+            return res.status(500).json({ error: 'DEV_USER_ID is not set' });
+        }
         
-        // TODO: Fetch encrypted access_token
-        const access_token = process.env.PLAID_ACCESS_TOKEN || '';
+        const storedToken = await getStoredAccessToken(userId);
+        const access_token = storedToken || process.env.PLAID_ACCESS_TOKEN || '';
         
         if (!access_token) {
             return res.status(404).json({ error: 'No connected account' });

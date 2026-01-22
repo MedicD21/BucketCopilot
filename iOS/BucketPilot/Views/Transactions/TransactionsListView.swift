@@ -70,7 +70,7 @@ struct TransactionRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(transaction.merchantName ?? transaction.description ?? "Unknown")
+                Text(transaction.merchantName ?? transaction.details ?? "Unknown")
                     .font(.headline)
                 
                 Text(transaction.date, style: .date)
