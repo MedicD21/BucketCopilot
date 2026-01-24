@@ -2,6 +2,73 @@ import Foundation
 import SwiftData
 
 @Model
+final class Account {
+    var id: UUID
+    var plaidAccountId: String
+    var name: String
+    var officialName: String?
+    var type: String?
+    var subtype: String?
+    var mask: String?
+    var institutionId: String?
+    var institutionName: String?
+    var currentBalance: Decimal?
+    var availableBalance: Decimal?
+    var creditLimit: Decimal?
+    var isoCurrencyCode: String?
+    var createdAt: Date
+    var updatedAt: Date
+    
+    init(
+        id: UUID = UUID(),
+        plaidAccountId: String,
+        name: String,
+        officialName: String? = nil,
+        type: String? = nil,
+        subtype: String? = nil,
+        mask: String? = nil,
+        institutionId: String? = nil,
+        institutionName: String? = nil,
+        currentBalance: Decimal? = nil,
+        availableBalance: Decimal? = nil,
+        creditLimit: Decimal? = nil,
+        isoCurrencyCode: String? = nil
+    ) {
+        self.id = id
+        self.plaidAccountId = plaidAccountId
+        self.name = name
+        self.officialName = officialName
+        self.type = type
+        self.subtype = subtype
+        self.mask = mask
+        self.institutionId = institutionId
+        self.institutionName = institutionName
+        self.currentBalance = currentBalance
+        self.availableBalance = availableBalance
+        self.creditLimit = creditLimit
+        self.isoCurrencyCode = isoCurrencyCode
+        self.createdAt = Date()
+        self.updatedAt = Date()
+    }
+}
+
+extension Account {
+    var displayName: String {
+        if let mask = mask, !mask.isEmpty {
+            return "\(name) ••\(mask)"
+        }
+        return name
+    }
+    
+    var displayBalance: Decimal? {
+        if let currentBalance = currentBalance {
+            return currentBalance
+        }
+        return availableBalance
+    }
+}
+
+@Model
 final class Transaction {
     var id: UUID
     var plaidTransactionId: String? // Stable Plaid ID for deduplication
@@ -58,5 +125,14 @@ extension Transaction {
     
     var isCredit: Bool {
         amount > 0
+    }
+
+    var isTransferLike: Bool {
+        let categoryTokens = categoryArray?.map { $0.lowercased() } ?? []
+        if categoryTokens.contains(where: { $0.contains("transfer") || $0.contains("payment") }) {
+            return true
+        }
+        let name = (merchantName ?? details ?? "").lowercased()
+        return name.contains("transfer") || name.contains("payment")
     }
 }

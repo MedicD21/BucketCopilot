@@ -47,7 +47,9 @@ class BucketLedgerService {
             predicate: #Predicate { $0.amount > 0 }
         )
         let incomeTransactions = try modelContext.fetch(incomeDescriptor)
-        let totalIncome = incomeTransactions.reduce(Decimal.zero) { $0 + $1.amount }
+        let totalIncome = incomeTransactions
+            .filter { !$0.isTransferLike }
+            .reduce(Decimal.zero) { $0 + $1.amount }
         
         // Get all allocations TO buckets
         let allocationDescriptor = FetchDescriptor<AllocationEvent>(

@@ -8,6 +8,7 @@ struct BucketPilotApp: App {
     init() {
         do {
             let schema = Schema([
+                Account.self,
                 Bucket.self,
                 Transaction.self,
                 TransactionSplit.self,

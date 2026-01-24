@@ -1,67 +1,168 @@
 import SwiftUI
 import SwiftData
 
-struct TransactionsListView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
-    @State private var showingAddTransaction = false
-    @State private var filter: TransactionFilter = .all
-    
-    var filteredTransactions: [Transaction] {
-        switch filter {
-        case .all:
-            return transactions
-        case .unassigned:
-            // Filter transactions with no splits or splits to nil bucket
-            return transactions.filter { transaction in
-                // TODO: Check if transaction has unassigned splits only
-                true // Placeholder
-            }
-        case .pending:
-            return transactions.filter { $0.isPending }
+struct AccountsListView: View {
+    @Query(sort: \Account.name) private var accounts: [Account]
+
+    var groupedAccounts: [(name: String, accounts: [Account])] {
+        let grouped = Dictionary(grouping: accounts) { account in
+            account.institutionName ?? "Other"
         }
+        return grouped
+            .map { key, value in
+                (name: key, accounts: value.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
     
     var body: some View {
         NavigationView {
             Group {
-                if filteredTransactions.isEmpty {
-                    EmptyTransactionsView(onAddTransaction: { showingAddTransaction = true })
+                if groupedAccounts.isEmpty {
+                    EmptyAccountsView()
                 } else {
                     List {
-                        Picker("Filter", selection: $filter) {
-                            ForEach(TransactionFilter.allCases, id: \.self) { filter in
-                                Text(filter.rawValue).tag(filter)
+                        ForEach(groupedAccounts, id: \.name) { group in
+                            Section(group.name) {
+                                ForEach(group.accounts) { account in
+                                    NavigationLink(destination: AccountDetailView(account: account)) {
+                                        AccountRow(account: account)
+                                    }
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
-                        .listRowInsets(EdgeInsets())
-                        
-                        ForEach(filteredTransactions) { transaction in
-                            TransactionRow(transaction: transaction)
-                        }
                     }
                 }
             }
-            .navigationTitle("Transactions")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddTransaction = true }) {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingAddTransaction) {
-                AddTransactionView()
-            }
+            .navigationTitle("Accounts")
         }
     }
 }
 
-enum TransactionFilter: String, CaseIterable {
-    case all = "All"
-    case unassigned = "Unassigned"
-    case pending = "Pending"
+struct AccountRow: View {
+    let account: Account
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(account.displayName)
+                    .font(.headline)
+                
+                if let subtype = account.subtype {
+                    Text(subtype.capitalized)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 4) {
+                if let balance = account.displayBalance {
+                    Text(formatCurrency(balance))
+                        .font(.headline)
+                } else {
+                    Text("—")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                }
+                
+                if let limit = account.creditLimit {
+                    Text("Limit \(formatCurrency(limit))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+    
+    private func formatCurrency(_ amount: Decimal) -> String {
+        NumberFormatter.currency.string(from: amount as NSDecimalNumber) ?? "$0.00"
+    }
+}
+
+struct AccountDetailView: View {
+    let account: Account
+    @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
+    
+    var accountTransactions: [Transaction] {
+        transactions.filter { $0.accountId == account.plaidAccountId }
+    }
+    
+    var body: some View {
+        List {
+            Section {
+                AccountSummaryView(account: account)
+            }
+            
+            Section("Transactions") {
+                if accountTransactions.isEmpty {
+                    Text("No transactions for this account.")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(accountTransactions) { transaction in
+                        TransactionRow(transaction: transaction)
+                    }
+                }
+            }
+        }
+        .navigationTitle(account.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct AccountSummaryView: View {
+    let account: Account
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let institutionName = account.institutionName {
+                SummaryTextRow(label: "Institution", value: institutionName)
+            }
+            if let currentBalance = account.currentBalance {
+                SummaryRow(label: "Current Balance", value: currentBalance)
+            }
+            if let availableBalance = account.availableBalance {
+                SummaryRow(label: "Available Balance", value: availableBalance)
+            }
+            if let creditLimit = account.creditLimit {
+                SummaryRow(label: "Credit Limit", value: creditLimit)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct SummaryRow: View {
+    let label: String
+    let value: Decimal
+    
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(formatCurrency(value))
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    private func formatCurrency(_ amount: Decimal) -> String {
+        NumberFormatter.currency.string(from: amount as NSDecimalNumber) ?? "$0.00"
+    }
+}
+
+struct SummaryTextRow: View {
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundColor(.secondary)
+        }
+    }
 }
 
 struct TransactionRow: View {
@@ -99,38 +200,22 @@ struct TransactionRow: View {
     }
 }
 
-struct EmptyTransactionsView: View {
-    let onAddTransaction: () -> Void
-    
+struct EmptyAccountsView: View {
     var body: some View {
         VStack(spacing: 24) {
-            Image(systemName: "list.bullet.rectangle")
+            Image(systemName: "banknote")
                 .font(.system(size: 64))
                 .foregroundColor(.secondary)
             
-            Text("No Transactions")
+            Text("No Accounts")
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            Text("Add transactions manually or connect your bank account")
+            Text("Connect your bank in Settings to import accounts")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            
-            Button(action: onAddTransaction) {
-                Label("Add Transaction", systemImage: "plus.circle.fill")
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
         }
         .padding()
-    }
-}
-
-struct AddTransactionView: View {
-    var body: some View {
-        Text("Add Transaction View - Coming soon")
     }
 }

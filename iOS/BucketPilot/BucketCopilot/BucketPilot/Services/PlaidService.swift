@@ -33,14 +33,78 @@ final class PlaidService {
             responseType: ExchangePublicTokenResponse.self
         )
     }
+
+    func isConnected() async -> Bool {
+        do {
+            let response: AccountsResponse = try await sendRequest(
+                path: "plaid/accounts",
+                method: "GET",
+                queryItems: [],
+                responseType: AccountsResponse.self
+            )
+            return !response.accounts.isEmpty
+        } catch {
+            return false
+        }
+    }
+
+    func fetchAccounts() async throws -> [PlaidAccount] {
+        let response: AccountsResponse = try await sendRequest(
+            path: "plaid/accounts",
+            method: "GET",
+            responseType: AccountsResponse.self
+        )
+        return response.accounts
+    }
+
+    func fetchTransactions(
+        startDate: Date = Calendar.current.date(byAdding: .year, value: -2, to: Date())
+            ?? Date(timeIntervalSinceNow: -60 * 60 * 24 * 365 * 2),
+        endDate: Date = Date()
+    ) async throws -> [PlaidTransaction] {
+        let queryItems = [
+            URLQueryItem(name: "start_date", value: Self.plaidDateFormatter.string(from: startDate)),
+            URLQueryItem(name: "end_date", value: Self.plaidDateFormatter.string(from: endDate))
+        ]
+        let response: TransactionsResponse = try await sendRequest(
+            path: "plaid/transactions",
+            method: "GET",
+            queryItems: queryItems,
+            responseType: TransactionsResponse.self
+        )
+        return response.transactions
+    }
+
+    private func sendRequest<ResponseBody: Decodable>(
+        path: String,
+        method: String,
+        queryItems: [URLQueryItem] = [],
+        responseType: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        return try await sendRequest(
+            path: path,
+            method: method,
+            body: Optional<EmptyBody>.none,
+            queryItems: queryItems,
+            responseType: responseType
+        )
+    }
     
     private func sendRequest<RequestBody: Encodable, ResponseBody: Decodable>(
         path: String,
         method: String,
-        body: RequestBody,
+        body: RequestBody?,
+        queryItems: [URLQueryItem] = [],
         responseType: ResponseBody.Type
     ) async throws -> ResponseBody {
-        let url = baseURL.appendingPathComponent(path)
+        var url = baseURL.appendingPathComponent(path)
+        if !queryItems.isEmpty {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.queryItems = queryItems
+            if let withQuery = components?.url {
+                url = withQuery
+            }
+        }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -49,7 +113,9 @@ final class PlaidService {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         
-        request.httpBody = try JSONEncoder().encode(body)
+        if let body = body {
+            request.httpBody = try JSONEncoder().encode(body)
+        }
         
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -85,7 +151,93 @@ private struct ExchangePublicTokenResponse: Decodable {
     let success: Bool
 }
 
+private struct AccountsResponse: Decodable {
+    let accounts: [PlaidAccount]
+}
+
+struct PlaidAccount: Decodable {
+    let accountId: String
+    let name: String
+    let officialName: String?
+    let type: String?
+    let subtype: String?
+    let mask: String?
+    let institutionId: String?
+    let institutionName: String?
+    let balances: PlaidBalances
+    
+    enum CodingKeys: String, CodingKey {
+        case accountId = "account_id"
+        case name
+        case officialName = "official_name"
+        case type
+        case subtype
+        case mask
+        case institutionId = "institution_id"
+        case institutionName = "institution_name"
+        case balances
+    }
+}
+
+struct PlaidBalances: Decodable {
+    let available: Double?
+    let current: Double?
+    let limit: Double?
+    let isoCurrencyCode: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case available
+        case current
+        case limit
+        case isoCurrencyCode = "iso_currency_code"
+    }
+}
+
 private struct EmptyBody: Encodable {}
+
+struct PlaidTransaction: Decodable {
+    let transactionId: String
+    let accountId: String
+    let name: String
+    let merchantName: String?
+    let amount: Double
+    let date: String
+    let category: [String]?
+    let pending: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case transactionId = "transaction_id"
+        case accountId = "account_id"
+        case name
+        case merchantName = "merchant_name"
+        case amount
+        case date
+        case category
+        case pending
+    }
+}
+
+private struct TransactionsResponse: Decodable {
+    let transactions: [PlaidTransaction]
+    let totalTransactions: Int?
+    let nextCursor: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case transactions
+        case totalTransactions = "total_transactions"
+        case nextCursor = "next_cursor"
+    }
+}
+
+private extension PlaidService {
+    static let plaidDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+}
 
 private enum PlaidServiceError: LocalizedError {
     case invalidResponse

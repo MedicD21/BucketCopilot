@@ -22,21 +22,31 @@ const configuration = new Configuration({
 
 const plaidClient = new PlaidApi(configuration);
 
-async function getStoredAccessToken(userId: string): Promise<string | null> {
+type StoredPlaidItem = {
+    item_id: string;
+    access_token_encrypted: string;
+    institution_id: string | null;
+    institution_name: string | null;
+};
+
+async function getStoredItems(userId: string): Promise<StoredPlaidItem[]> {
     const { data, error } = await supabase
         .from(Tables.PLAID_ITEMS)
-        .select('access_token_encrypted')
+        .select('item_id, access_token_encrypted, institution_id, institution_name')
         .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('created_at', { ascending: false });
     
     if (error) {
-        console.error('Error fetching Plaid access token:', error.message);
-        return null;
+        console.error('Error fetching Plaid items:', error.message);
+        return [];
     }
     
-    return data?.access_token_encrypted ?? null;
+    return data ?? [];
+}
+
+async function getStoredAccessToken(userId: string): Promise<string | null> {
+    const items = await getStoredItems(userId);
+    return items[0]?.access_token_encrypted ?? null;
 }
 
 /**
@@ -96,6 +106,22 @@ router.post('/exchange_public_token', async (req, res) => {
         });
         
         const { access_token, item_id } = response.data;
+
+        let institution_id: string | null = null;
+        let institution_name: string | null = null;
+        try {
+            const itemResponse = await plaidClient.itemGet({ access_token });
+            institution_id = itemResponse.data.item.institution_id ?? null;
+            if (institution_id) {
+                const instResponse = await plaidClient.institutionsGetById({
+                    institution_id,
+                    country_codes: ['US'],
+                });
+                institution_name = instResponse.data.institution.name ?? null;
+            }
+        } catch (instError) {
+            console.warn('Unable to fetch institution metadata:', instError);
+        }
         
         const { error: upsertError } = await supabase
             .from(Tables.PLAID_ITEMS)
@@ -104,6 +130,8 @@ router.post('/exchange_public_token', async (req, res) => {
                     user_id: userId,
                     item_id,
                     access_token_encrypted: access_token,
+                    institution_id,
+                    institution_name,
                 },
                 { onConflict: 'item_id' }
             );
@@ -137,19 +165,40 @@ router.get('/accounts', async (req, res) => {
             return res.status(500).json({ error: 'DEV_USER_ID is not set' });
         }
         
-        const storedToken = await getStoredAccessToken(userId);
-        const access_token = storedToken || process.env.PLAID_ACCESS_TOKEN || '';
-        
-        if (!access_token) {
+        const items = await getStoredItems(userId);
+        if (items.length === 0 && !process.env.PLAID_ACCESS_TOKEN) {
             return res.status(404).json({ error: 'No connected account' });
         }
-        
-        const response = await plaidClient.accountsGet({
-            access_token,
-        });
+
+        const accounts: any[] = [];
+        const itemsToFetch =
+            items.length > 0
+                ? items
+                : [
+                      {
+                          item_id: 'env',
+                          access_token_encrypted: process.env.PLAID_ACCESS_TOKEN!,
+                          institution_id: null,
+                          institution_name: null,
+                      },
+                  ];
+
+        for (const item of itemsToFetch) {
+            const response = await plaidClient.accountsGet({
+                access_token: item.access_token_encrypted,
+            });
+            response.data.accounts.forEach((account) => {
+                accounts.push({
+                    ...account,
+                    item_id: item.item_id,
+                    institution_id: item.institution_id,
+                    institution_name: item.institution_name,
+                });
+            });
+        }
         
         res.json({
-            accounts: response.data.accounts,
+            accounts,
         });
     } catch (error) {
         console.error('Error fetching accounts:', error);
@@ -172,10 +221,8 @@ router.get('/transactions', async (req, res) => {
             return res.status(500).json({ error: 'DEV_USER_ID is not set' });
         }
         
-        const storedToken = await getStoredAccessToken(userId);
-        const access_token = storedToken || process.env.PLAID_ACCESS_TOKEN || '';
-        
-        if (!access_token) {
+        const items = await getStoredItems(userId);
+        if (items.length === 0 && !process.env.PLAID_ACCESS_TOKEN) {
             return res.status(404).json({ error: 'No connected account' });
         }
         
@@ -188,18 +235,48 @@ router.get('/transactions', async (req, res) => {
             ? new Date(start_date as string)
             : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         
-        const response = await plaidClient.transactionsGet({
-            access_token,
-            start_date: startDate.toISOString().split('T')[0],
-            end_date: endDate.toISOString().split('T')[0],
-            cursor: cursor as string | undefined,
-            count: 500,
-        });
-        
+        const transactions: any[] = [];
+        let totalTransactions = 0;
+        let nextCursor: string | null = null;
+
+        const itemsToFetch =
+            items.length > 0
+                ? items
+                : [
+                      {
+                          item_id: 'env',
+                          access_token_encrypted: process.env.PLAID_ACCESS_TOKEN!,
+                          institution_id: null,
+                          institution_name: null,
+                      },
+                  ];
+
+        for (const item of itemsToFetch) {
+            const response = await plaidClient.transactionsGet({
+                access_token: item.access_token_encrypted,
+                start_date: startDate.toISOString().split('T')[0],
+                end_date: endDate.toISOString().split('T')[0],
+                cursor: cursor as string | undefined,
+                options: {
+                    count: 500,
+                },
+            });
+            totalTransactions += response.data.total_transactions;
+            nextCursor = response.data.next_cursor ?? nextCursor;
+            response.data.transactions.forEach((transaction) => {
+                transactions.push({
+                    ...transaction,
+                    item_id: item.item_id,
+                    institution_id: item.institution_id,
+                    institution_name: item.institution_name,
+                });
+            });
+        }
+
         res.json({
-            transactions: response.data.transactions,
-            total_transactions: response.data.total_transactions,
-            next_cursor: response.data.next_cursor,
+            transactions,
+            total_transactions: totalTransactions,
+            next_cursor: nextCursor,
         });
     } catch (error) {
         console.error('Error fetching transactions:', error);

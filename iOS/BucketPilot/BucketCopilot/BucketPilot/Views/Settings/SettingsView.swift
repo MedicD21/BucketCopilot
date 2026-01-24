@@ -115,6 +115,9 @@ struct SettingsView: View {
                 PlaidLinkView(isConnected: $bankConnected)
             }
         }
+        .task {
+            await refreshBankConnection()
+        }
     }
     
     private func toggleSync(_ enabled: Bool) {
@@ -161,6 +164,13 @@ struct SettingsView: View {
     private func disconnectBank() {
         // TODO: Implement bank disconnection
         bankConnected = false
+    }
+
+    private func refreshBankConnection() async {
+        let connected = await PlaidService().isConnected()
+        await MainActor.run {
+            bankConnected = connected
+        }
     }
     
     private func exportData(format: ExportFormat) {
@@ -225,6 +235,7 @@ enum ExportFormat {
 
 struct PlaidLinkView: View {
     @SwiftUI.Environment(\.dismiss) private var dismiss
+    @SwiftUI.Environment(\.modelContext) private var modelContext
     @Binding var isConnected: Bool
     @State private var linkToken: String?
     @State private var isLoading = true
@@ -314,14 +325,29 @@ struct PlaidLinkView: View {
         Task {
             do {
                 try await plaidService.exchangePublicToken(publicToken)
-                await MainActor.run {
-                    isConnected = true
-                    dismiss()
-                }
             } catch {
                 await MainActor.run {
                     errorMessage = "Failed to exchange token: \(error.localizedDescription)"
                 }
+                return
+            }
+
+            do {
+                let accounts = try await plaidService.fetchAccounts()
+                await importAccounts(accounts)
+                let transactions = try await plaidService.fetchTransactions()
+                await importTransactions(transactions)
+            } catch {
+                await MainActor.run {
+                    isConnected = true
+                    errorMessage = "Connected, but failed to import transactions: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            await MainActor.run {
+                isConnected = true
+                dismiss()
             }
         }
     }
@@ -334,5 +360,125 @@ struct PlaidLinkView: View {
         }
         showingLink = false
     }
-}
 
+    @MainActor
+    private func importTransactions(_ plaidTransactions: [PlaidTransaction]) {
+        let descriptor = FetchDescriptor<Transaction>()
+        let existing = (try? modelContext.fetch(descriptor)) ?? []
+        var existingByPlaidId: [String: Transaction] = [:]
+        existing.forEach { transaction in
+            if let plaidId = transaction.plaidTransactionId {
+                existingByPlaidId[plaidId] = transaction
+            }
+        }
+
+        for plaidTransaction in plaidTransactions {
+            let merchantName = plaidTransaction.merchantName ?? plaidTransaction.name
+            let details = plaidTransaction.name
+            let amountDecimal = Decimal(plaidTransaction.amount)
+            let normalizedAmount = amountDecimal < 0 ? abs(amountDecimal) : -abs(amountDecimal)
+            let date = Self.plaidDateFormatter.date(from: plaidTransaction.date) ?? Date()
+            let categoryString = encodeCategory(plaidTransaction.category)
+
+            if let existingTransaction = existingByPlaidId[plaidTransaction.transactionId] {
+                existingTransaction.accountId = plaidTransaction.accountId
+                existingTransaction.merchantName = merchantName
+                existingTransaction.amount = normalizedAmount
+                existingTransaction.date = date
+                existingTransaction.category = categoryString
+                existingTransaction.details = details
+                existingTransaction.isPending = plaidTransaction.pending
+            } else {
+                let transaction = Transaction(
+                    plaidTransactionId: plaidTransaction.transactionId,
+                    accountId: plaidTransaction.accountId,
+                    merchantName: merchantName,
+                    amount: normalizedAmount,
+                    date: date,
+                    category: plaidTransaction.category,
+                    details: details,
+                    isPending: plaidTransaction.pending
+                )
+                modelContext.insert(transaction)
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    @MainActor
+    private func importAccounts(_ plaidAccounts: [PlaidAccount]) {
+        let descriptor = FetchDescriptor<Account>()
+        let existing = (try? modelContext.fetch(descriptor)) ?? []
+        var existingByPlaidId: [String: Account] = [:]
+        var duplicates: [Account] = []
+        for account in existing {
+            if existingByPlaidId[account.plaidAccountId] == nil {
+                existingByPlaidId[account.plaidAccountId] = account
+            } else {
+                duplicates.append(account)
+            }
+        }
+        duplicates.forEach { modelContext.delete($0) }
+
+        let fetchedIds = Set(plaidAccounts.map { $0.accountId })
+        for plaidAccount in plaidAccounts {
+            let currentBalance = plaidAccount.balances.current.map { Decimal($0) }
+            let availableBalance = plaidAccount.balances.available.map { Decimal($0) }
+            let creditLimit = plaidAccount.balances.limit.map { Decimal($0) }
+
+            if let existingAccount = existingByPlaidId[plaidAccount.accountId] {
+                existingAccount.name = plaidAccount.name
+                existingAccount.officialName = plaidAccount.officialName
+                existingAccount.type = plaidAccount.type
+                existingAccount.subtype = plaidAccount.subtype
+                existingAccount.mask = plaidAccount.mask
+                existingAccount.institutionId = plaidAccount.institutionId
+                existingAccount.institutionName = plaidAccount.institutionName
+                existingAccount.currentBalance = currentBalance
+                existingAccount.availableBalance = availableBalance
+                existingAccount.creditLimit = creditLimit
+                existingAccount.isoCurrencyCode = plaidAccount.balances.isoCurrencyCode
+                existingAccount.updatedAt = Date()
+            } else {
+                let account = Account(
+                    plaidAccountId: plaidAccount.accountId,
+                    name: plaidAccount.name,
+                    officialName: plaidAccount.officialName,
+                    type: plaidAccount.type,
+                    subtype: plaidAccount.subtype,
+                    mask: plaidAccount.mask,
+                    institutionId: plaidAccount.institutionId,
+                    institutionName: plaidAccount.institutionName,
+                    currentBalance: currentBalance,
+                    availableBalance: availableBalance,
+                    creditLimit: creditLimit,
+                    isoCurrencyCode: plaidAccount.balances.isoCurrencyCode
+                )
+                modelContext.insert(account)
+            }
+        }
+
+        for account in existingByPlaidId.values where !fetchedIds.contains(account.plaidAccountId) {
+            modelContext.delete(account)
+        }
+
+        try? modelContext.save()
+    }
+
+    private func encodeCategory(_ category: [String]?) -> String? {
+        guard let category = category,
+              let data = try? JSONEncoder().encode(category) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static let plaidDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+}

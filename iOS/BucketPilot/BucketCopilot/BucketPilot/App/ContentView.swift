@@ -19,9 +19,9 @@ struct ContentView: View {
                 }
                 .tag(1)
             
-            TransactionsListView()
+            AccountsListView()
                 .tabItem {
-                    Label("Transactions", systemImage: "list.bullet")
+                    Label("Accounts", systemImage: "banknote")
                 }
                 .tag(2)
             
@@ -49,5 +49,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Bucket.self, Transaction.self])
+        .modelContainer(for: [Account.self, Bucket.self, Transaction.self])
 }
